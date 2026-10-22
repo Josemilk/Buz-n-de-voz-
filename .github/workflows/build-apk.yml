@@ -1,0 +1,73 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Ensamblar APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataforma 35
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Keystore para la APK instalable
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/cinta-release.jks" \
+            -alias cinta \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Cinta, OU=Buzon, O=Josemilk, C=US"
+          echo "CINTA_KEYSTORE=$RUNNER_TEMP/cinta-release.jks" >> "$GITHUB_ENV"
+          echo "CINTA_STORE_PASS=android" >> "$GITHUB_ENV"
+          echo "CINTA_KEY_ALIAS=cinta" >> "$GITHUB_ENV"
+          echo "CINTA_KEY_PASS=android" >> "$GITHUB_ENV"
+
+      - name: Compilar debug y release
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug assembleRelease --stacktrace --no-daemon
+
+      - name: Publicar APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cinta-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Publicar APK release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cinta-release
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
